@@ -58,10 +58,15 @@ jobs:
         continue-on-error: true
         env:
           PYTHONUNBUFFERED: "1"
-        run: timeout 19800 python oci_retry.py
+        run: |
+          set +e
+          timeout 19800 python oci_retry.py
+          exit_code=$?
+          echo "exit_code=$exit_code" >> "$GITHUB_OUTPUT"
+          exit "$exit_code"
 
       - name: Auto-disable workflow on success
-        if: steps.run_script.outcome == 'success'
+        if: steps.run_script.outputs.exit_code == '0'
         run: |
           curl -s -X PUT \
             -H "Authorization: token ${{ secrets.GH_PAT }}" \
@@ -70,11 +75,17 @@ jobs:
           echo "Workflow auto-disabled"
 
       - name: Trigger next Job (seamless relay)
-        if: steps.run_script.outcome != 'success'
+        if: steps.run_script.outputs.exit_code == '124'
         run: |
-          curl -s -X POST \
+          curl --fail-with-body -sS -X POST \
             -H "Authorization: token ${{ secrets.GH_PAT }}" \
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/${{ github.repository }}/actions/workflows/oci_retry.yml/dispatches \
             -d '{"ref":"main"}'
           echo "Next Job triggered"
+
+      - name: Fail on unexpected script error
+        if: steps.run_script.outputs.exit_code != '0' && steps.run_script.outputs.exit_code != '124'
+        run: |
+          echo "Script exited unexpectedly with code ${{ steps.run_script.outputs.exit_code }}"
+          exit 1
