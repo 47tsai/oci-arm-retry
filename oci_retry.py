@@ -223,6 +223,16 @@ def main():
         except oci.exceptions.ServiceError as e:
             if "Out of host capacity" in str(e) or "capacity" in str(e).lower():
                 print(f"❌ Out of capacity, retrying...")
+            elif e.status == 429 or e.code == "TooManyRequests":
+                # OCI rate-limits launch requests occasionally. Back off longer
+                # instead of terminating the workflow and losing the retry loop.
+                backoff = max(RETRY_INTERVAL, 300)
+                print(
+                    f"⚠️ OCI rate limit (429 TooManyRequests). "
+                    f"Waiting {backoff}s before retrying..."
+                )
+                time.sleep(backoff)
+                continue
             else:
                 print(f"❌ Non-capacity OCI API error: {e.message}")
                 raise
