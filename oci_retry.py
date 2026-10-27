@@ -196,7 +196,9 @@ def main():
             if "Out of host capacity" in str(e) or "capacity" in str(e).lower():
                 print(f"❌ Out of capacity, retrying...")
             else:
-                print(f"❌ API error: {e.message}, retrying...")
+                print(f"❌ Non-capacity OCI API error: {e.message}")
+                raise
+
         except Exception as e:
             print(f"⚠️ Network timeout or other error, retrying... ({type(e).__name__})")
 
