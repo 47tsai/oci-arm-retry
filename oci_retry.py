@@ -14,7 +14,7 @@ import datetime
 COMPARTMENT_ID = (
     "ocid1.tenancy.oc1..aaaaaaaahds24vzvh5xqa6ysnubzv5ljdkkuqeonqzz4quro5dpjwntyk4va"  # Replace with your tenancy OCID
 )
-SSH_PUBLIC_KEY = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDdsLT/y7kupelr7rr+NcIyPVb4ZC20x9L5VuNMC5aYlXmSuqJQemXzdzfvp5F899CNdBe+TJJ+w55ka6C5J8vZTMmT4IfIOKZdJsKaTwOCbYTRz62PLcq90veNBPdn0kcnUxrqD3ReKxkKhyyL9WIWH1+4e945w9TL2wgr7Os0rYN5q/4Sa6ioof1I4NE9lGw+WL2yjOI0YLQXmWnvRb7qcQUdOCxgbOXw3GsPFwp3UZ+yJm8kbwFzJdTojaUeriuk3HQYFjzaOVN07kmf2vTQKSgsyw5B+BhyeYQmcRtNTNiriZ7skfS06/24ZM/hzLBz7/PQgw0DoRHDWB5YbyT1 ssh-key-2026-03-05"  # Replace with your SSH public key (.pub file content)
+SSH_PUBLIC_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJzw6MlJrOu3+DFqesQz1a5l9+6V3c/yd9kfEJJ6yfqh oci-a1-retry"  # Dedicated public key for the new ARM instance
 INSTANCE_NAME = "streamlit-server"
 ARM_OCPUS = 2
 ARM_MEMORY_IN_GBS = 12
