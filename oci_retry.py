@@ -56,12 +56,40 @@ def get_ubuntu_arm_image():
 def create_vcn_and_subnet():
     network = oci.core.VirtualNetworkClient(config)
 
-    # Check if VCN already exists
-    vcns = network.list_vcns(COMPARTMENT_ID, display_name="retry-vcn").data
-    if vcns:
-        vcn = vcns[0]
+    # Prefer the dedicated VCN if it exists.
+    named_vcns = network.list_vcns(COMPARTMENT_ID, display_name="retry-vcn").data
+    if named_vcns:
+        vcn = named_vcns[0]
         print(f"Using existing VCN: {vcn.id}")
     else:
+        # VCN quotas can be very low on Free Tier. Reuse an existing public
+        # subnet rather than trying to create another VCN unnecessarily.
+        existing_vcns = network.list_vcns(COMPARTMENT_ID).data
+        for existing_vcn in existing_vcns:
+            existing_subnets = network.list_subnets(
+                COMPARTMENT_ID, vcn_id=existing_vcn.id
+            ).data
+            public_subnets = [
+                subnet for subnet in existing_subnets
+                if subnet.lifecycle_state == "AVAILABLE"
+                and not subnet.prohibit_public_ip_on_vnic
+            ]
+            if public_subnets:
+                subnet = public_subnets[0]
+                print(
+                    f"Reusing existing VCN: {existing_vcn.id}; "
+                    f"public subnet: {subnet.id}"
+                )
+                return subnet.id
+
+        if existing_vcns:
+            raise RuntimeError(
+                "VCN limit reached and no existing subnet allowing public IPs "
+                "was found in this compartment. In OCI Console, check the "
+                "existing VCN/subnet and its internet gateway/route/security "
+                "rules, or free up an unused VCN."
+            )
+
         vcn = network.create_vcn(
             oci.core.models.CreateVcnDetails(
                 compartment_id=COMPARTMENT_ID,
