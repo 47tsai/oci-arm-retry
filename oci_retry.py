@@ -286,15 +286,11 @@ def main():
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"\n[{now}] Attempt #{attempt} to create instance...")
 
+        instance = None
         try:
             instance = try_create_instance(subnet_id, ad_name, image_id)
             print(f"\n✅ Instance creation request accepted")
             print(f"   ID: {instance.id}")
-            instance, public_ip = verify_instance(instance.id)
-            print(f"   Final state: {instance.lifecycle_state}")
-            print(f"   Public IP: {public_ip or 'not assigned yet'}")
-            send_discord_success(instance, public_ip)
-            break
         except oci.exceptions.ServiceError as e:
             if "Out of host capacity" in str(e) or "capacity" in str(e).lower():
                 print("❌ Out of host capacity; retrying...")
@@ -330,6 +326,14 @@ def main():
                 raise
         except Exception as e:
             print(f"⚠️ Network timeout or other error, retrying... ({type(e).__name__})")
+
+        if instance is not None:
+            # Do not return to the launch loop after OCI has created the instance.
+            instance, public_ip = verify_instance(instance.id)
+            print(f"   Final state: {instance.lifecycle_state}")
+            print(f"   Public IP: {public_ip or 'not assigned yet'}")
+            send_discord_success(instance, public_ip)
+            break
 
         time.sleep(RETRY_INTERVAL)
 
