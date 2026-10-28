@@ -1,6 +1,10 @@
 import oci
 import time
 import datetime
+import json
+import os
+import urllib.request
+import urllib.error
 
 # ╔══════════════════════════════════════════════════════╗
 # ║  Target : VM.Standard.A1.Flex (ARM)                  ║
@@ -195,6 +199,75 @@ def try_create_instance(subnet_id, ad_name, image_id):
     return instance
 
 
+def verify_instance(instance_id, timeout_seconds=300):
+    """Wait for RUNNING state and discover the public IP, without launching again."""
+    compute = oci.core.ComputeClient(config)
+    network = oci.core.VirtualNetworkClient(config)
+    deadline = time.time() + timeout_seconds
+    last_state = "UNKNOWN"
+    public_ip = None
+
+    while time.time() < deadline:
+        instance = compute.get_instance(instance_id).data
+        last_state = instance.lifecycle_state
+        print(f"Validation: instance state = {last_state}")
+
+        if last_state in ("TERMINATED", "TERMINATING"):
+            raise RuntimeError(
+                f"Instance {instance_id} entered unexpected state {last_state}"
+            )
+
+        attachments = compute.list_vnic_attachments(
+            COMPARTMENT_ID, instance_id=instance_id
+        ).data
+        for attachment in attachments:
+            if attachment.lifecycle_state != "ATTACHED":
+                continue
+            vnic = network.get_vnic(attachment.vnic_id).data
+            if vnic.public_ip:
+                public_ip = vnic.public_ip
+                break
+
+        if last_state == "RUNNING" and public_ip:
+            return instance, public_ip
+        time.sleep(15)
+
+    print(
+        f"⚠️ Validation timed out after {timeout_seconds}s: "
+        f"state={last_state}, public_ip={public_ip or 'not assigned'}"
+    )
+    return compute.get_instance(instance_id).data, public_ip
+
+
+def send_discord_success(instance, public_ip):
+    """Send one success notification when the optional webhook secret is configured."""
+    webhook_url = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+    if not webhook_url:
+        print("Discord notification skipped: DISCORD_WEBHOOK_URL secret is not set.")
+        return
+
+    content = (
+        "✅ **Oracle Cloud ARM A1.Flex 建立成功**\n"
+        f"名稱：{instance.display_name}\n"
+        f"狀態：{instance.lifecycle_state}\n"
+        f"Instance OCID：{instance.id}\n"
+        f"公網 IP：{public_ip or '尚未取得，請到 OCI Console 確認'}"
+    )
+    payload = json.dumps({"content": content}).encode("utf-8")
+    request = urllib.request.Request(
+        webhook_url,
+        data=payload,
+        headers={"Content-Type": "application/json", "User-Agent": "oci-arm-retry"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            print(f"Discord notification sent (HTTP {response.status}).")
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        # A notification failure must not turn a successfully created VM into a retry.
+        print(f"⚠️ Discord notification failed: {type(exc).__name__}: {exc}")
+
+
 def main():
     print("Initializing network configuration...")
     subnet_id = create_vcn_and_subnet()
@@ -213,16 +286,14 @@ def main():
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"\n[{now}] Attempt #{attempt} to create instance...")
 
+        instance = None
         try:
             instance = try_create_instance(subnet_id, ad_name, image_id)
-            print(f"\n✅ Success! Instance created")
+            print(f"\n✅ Instance creation request accepted")
             print(f"   ID: {instance.id}")
-            print(f"   State: {instance.lifecycle_state}")
-            print(f"   Check Oracle Cloud Console for the public IP")
-            break
         except oci.exceptions.ServiceError as e:
             if "Out of host capacity" in str(e) or "capacity" in str(e).lower():
-                print(f"❌ Out of capacity, retrying...")
+                print("❌ Out of host capacity; retrying...")
             elif e.status == 429 or e.code == "TooManyRequests":
                 # OCI rate-limits launch requests occasionally. Back off longer
                 # instead of terminating the workflow and losing the retry loop.
@@ -233,12 +304,43 @@ def main():
                 )
                 time.sleep(backoff)
                 continue
-            else:
-                print(f"❌ Non-capacity OCI API error: {e.message}")
+            elif e.status in (408, 500, 502, 503, 504) or e.status >= 500:
+                # Transient OCI service failures should not break the retry chain.
+                print(
+                    f"⚠️ Temporary OCI service error "
+                    f"(HTTP {e.status}, {e.code}): {e.message}. "
+                    f"Retrying in {RETRY_INTERVAL}s..."
+                )
+            elif e.status in (401, 403) or e.code in (
+                "NotAuthorized", "NotAuthorizedOrNotFound"
+            ):
+                print(
+                    f"🛑 OCI authentication/permission error "
+                    f"(HTTP {e.status}, {e.code}): {e.message}"
+                )
                 raise
-
+            elif e.code in ("LimitExceeded", "QuotaExceeded"):
+                print(
+                    f"🛑 OCI quota/limit error ({e.code}): {e.message}. "
+                    "This will not be fixed by repeated retries."
+                )
+                raise
+            else:
+                print(
+                    f"🛑 Non-retryable OCI API error "
+                    f"(HTTP {e.status}, {e.code}): {e.message}"
+                )
+                raise
         except Exception as e:
             print(f"⚠️ Network timeout or other error, retrying... ({type(e).__name__})")
+
+        if instance is not None:
+            # Do not return to the launch loop after OCI has created the instance.
+            instance, public_ip = verify_instance(instance.id)
+            print(f"   Final state: {instance.lifecycle_state}")
+            print(f"   Public IP: {public_ip or 'not assigned yet'}")
+            send_discord_success(instance, public_ip)
+            break
 
         time.sleep(RETRY_INTERVAL)
 

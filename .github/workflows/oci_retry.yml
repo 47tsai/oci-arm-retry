@@ -58,6 +58,7 @@ jobs:
         continue-on-error: true
         env:
           PYTHONUNBUFFERED: "1"
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           set +e
           timeout 19800 python oci_retry.py
