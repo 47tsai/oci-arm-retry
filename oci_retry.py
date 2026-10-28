@@ -304,6 +304,13 @@ def main():
                 )
                 time.sleep(backoff)
                 continue
+            elif e.status in (408, 500, 502, 503, 504) or e.status >= 500:
+                # Transient OCI service failures should not break the retry chain.
+                print(
+                    f"⚠️ Temporary OCI service error "
+                    f"(HTTP {e.status}, {e.code}): {e.message}. "
+                    f"Retrying in {RETRY_INTERVAL}s..."
+                )
             elif e.status in (401, 403) or e.code in (
                 "NotAuthorized", "NotAuthorizedOrNotFound"
             ):
