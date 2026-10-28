@@ -335,9 +335,18 @@ def main():
             print(f"⚠️ Network timeout or other error, retrying... ({type(e).__name__})")
 
         if instance is not None:
-            # Do not return to the launch loop after OCI has created the instance.
-            instance, public_ip = verify_instance(instance.id)
-            print(f"   Final state: {instance.lifecycle_state}")
+            # Once OCI accepts the launch request, never return to the launch loop.
+            # Verification failures must not suppress the success notification.
+            public_ip = None
+            try:
+                instance, public_ip = verify_instance(instance.id)
+            except Exception as e:
+                print(
+                    f"⚠️ Instance launch was accepted, but verification failed: "
+                    f"{type(e).__name__}: {e}"
+                )
+                print("⚠️ Sending Discord notification with the launch response details.")
+            print(f"   Final state: {getattr(instance, 'lifecycle_state', 'UNKNOWN')}")
             print(f"   Public IP: {public_ip or 'not assigned yet'}")
             send_discord_success(instance, public_ip)
             break
